@@ -493,7 +493,7 @@ body::after {
   transition: opacity 200ms;
 }
 #chart-wrap.fading { opacity: 0; }
-#price-chart { display: block; }
+#price-chart-container { width: 100%; height: 100%; }
 
 /* ─── TOP 10 TABLE ───────────────────────────────────────── */
 #table-card {
@@ -924,7 +924,7 @@ tbody td:nth-child(2) { text-align: left; }
         </div>
       </div>
       <div id="chart-wrap">
-        <canvas id="price-chart"></canvas>
+        <div id="price-chart-container"></div>
       </div>
     </div>
 
@@ -976,15 +976,15 @@ tbody td:nth-child(2) { text-align: left; }
       <div id="fg-comparisons">
         <div class="fg-comp">
           <div class="fg-comp-label">Yesterday</div>
-          <div class="fg-comp-value" style="color:var(--accent-green)">63</div>
+          <div class="fg-comp-value" id="fg-yesterday">—</div>
         </div>
         <div class="fg-comp">
           <div class="fg-comp-label">Last Week</div>
-          <div class="fg-comp-value" style="color:var(--accent-green)">58</div>
+          <div class="fg-comp-value" id="fg-lastweek">—</div>
         </div>
         <div class="fg-comp">
           <div class="fg-comp-label">Last Month</div>
-          <div class="fg-comp-value" style="color:var(--accent-red)">41</div>
+          <div class="fg-comp-value" id="fg-lastmonth">—</div>
         </div>
       </div>
 
@@ -994,38 +994,60 @@ tbody td:nth-child(2) { text-align: left; }
 
 </main>
 
-<!-- Chart.js CDN — loaded before our script -->
+<!-- Chart.js for sparklines -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<!-- Lightweight Charts (TradingView) for candlesticks -->
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script>
 
 /* ─── CONFIG ─────────────────────────────────────────────── */
-const BASE = 'https://api.coingecko.com/api/v3';
+const BASE    = 'https://api.coingecko.com/api/v3';
+const FNG_URL = 'https://api.alternative.me/fng/?limit=30';
 const REFRESH_MS = 30_000;
 
 /* ─── STATE ──────────────────────────────────────────────── */
-let activeCoinId   = 'bitcoin';
-let activePeriod   = 7;
-let coinsCache     = null;
-let priceChart     = null;
-let refreshTimer   = null;
+let activeCoinId    = 'bitcoin';
+let activePeriod    = 7;
+let coinsCache      = null;
+let lwChart         = null;
+let candleSeries    = null;
+let chartRO         = null;
+let refreshTimer    = null;
 
 /* ─── MOCK FALLBACK DATA ─────────────────────────────────── */
-const MOCK_COINS = [
-  { id:'bitcoin',   symbol:'btc', name:'Bitcoin',   image:'https://assets.coingecko.com/coins/images/1/small/bitcoin.png',   current_price:67420.12, price_change_percentage_24h:2.41,  price_change_percentage_7d_in_currency:5.12,  market_cap:1330000000000, total_volume:28400000000, high_24h:68200, low_24h:65800, market_cap_rank:1, sparkline_in_7d:{price:makeFakeSpark(67420,8)} },
-  { id:'ethereum',  symbol:'eth', name:'Ethereum',  image:'https://assets.coingecko.com/coins/images/279/small/ethereum.png', current_price:3512.88,  price_change_percentage_24h:-1.14, price_change_percentage_7d_in_currency:3.22,  market_cap:422000000000,  total_volume:14200000000, high_24h:3600,  low_24h:3420,  market_cap_rank:2, sparkline_in_7d:{price:makeFakeSpark(3512,8)} },
-  { id:'tether',    symbol:'usdt',name:'Tether',    image:'https://assets.coingecko.com/coins/images/325/small/Tether.png',  current_price:1.00,     price_change_percentage_24h:0.01,  price_change_percentage_7d_in_currency:0.02,  market_cap:112000000000,  total_volume:58000000000, high_24h:1.001, low_24h:0.999, market_cap_rank:3, sparkline_in_7d:{price:makeFakeSpark(1,8)} },
-  { id:'bnb',       symbol:'bnb', name:'BNB',       image:'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png', current_price:594.22, price_change_percentage_24h:1.88,  price_change_percentage_7d_in_currency:-2.10, market_cap:86000000000,   total_volume:1800000000,  high_24h:610,   low_24h:582,   market_cap_rank:4, sparkline_in_7d:{price:makeFakeSpark(594,8)} },
-  { id:'solana',    symbol:'sol', name:'Solana',    image:'https://assets.coingecko.com/coins/images/4128/small/solana.png', current_price:178.44,  price_change_percentage_24h:3.77,  price_change_percentage_7d_in_currency:9.34,  market_cap:82000000000,   total_volume:3600000000,  high_24h:185,   low_24h:172,   market_cap_rank:5, sparkline_in_7d:{price:makeFakeSpark(178,8)} },
-  { id:'usd-coin',  symbol:'usdc',name:'USDC',      image:'https://assets.coingecko.com/coins/images/6319/small/usdc.png',  current_price:1.00,     price_change_percentage_24h:0.00,  price_change_percentage_7d_in_currency:0.01,  market_cap:44000000000,   total_volume:7200000000,  high_24h:1.001, low_24h:0.999, market_cap_rank:6, sparkline_in_7d:{price:makeFakeSpark(1,8)} },
-  { id:'xrp',       symbol:'xrp', name:'XRP',       image:'https://assets.coingecko.com/coins/images/44/small/xrp-symbol-white-128.png', current_price:0.5812, price_change_percentage_24h:-0.92, price_change_percentage_7d_in_currency:1.44, market_cap:31000000000, total_volume:1100000000, high_24h:0.598, low_24h:0.571, market_cap_rank:7, sparkline_in_7d:{price:makeFakeSpark(0.58,8)} },
-  { id:'staked-ether',symbol:'steth',name:'Lido Staked ETH',image:'https://assets.coingecko.com/coins/images/13442/small/steth_logo.png',current_price:3509.00,price_change_percentage_24h:-1.10,price_change_percentage_7d_in_currency:3.18,market_cap:29000000000,total_volume:180000000,high_24h:3597,low_24h:3418,market_cap_rank:8,sparkline_in_7d:{price:makeFakeSpark(3509,8)} },
-  { id:'dogecoin',  symbol:'doge',name:'Dogecoin',  image:'https://assets.coingecko.com/coins/images/5/small/dogecoin.png', current_price:0.1642,  price_change_percentage_24h:4.21,  price_change_percentage_7d_in_currency:12.44, market_cap:23600000000,  total_volume:2100000000,  high_24h:0.172, low_24h:0.155, market_cap_rank:9,  sparkline_in_7d:{price:makeFakeSpark(0.164,8)} },
-  { id:'cardano',   symbol:'ada', name:'Cardano',   image:'https://assets.coingecko.com/coins/images/975/small/cardano.png',current_price:0.4812,  price_change_percentage_24h:-2.14, price_change_percentage_7d_in_currency:-4.88, market_cap:17100000000,  total_volume:420000000,   high_24h:0.498, low_24h:0.471, market_cap_rank:10, sparkline_in_7d:{price:makeFakeSpark(0.48,8)} },
-];
 function makeFakeSpark(base, points) {
   return Array.from({length: points}, (_, i) =>
     base * (1 + (Math.random() - 0.5) * 0.12 + i * 0.005));
 }
+function makeFakeOHLC(base, count, intervalMs) {
+  const candles = [];
+  let price = base;
+  const now = Date.now();
+  for (let i = count; i >= 0; i--) {
+    const time = Math.floor((now - i * intervalMs) / 1000);
+    const open  = price;
+    const move  = price * (Math.random() - 0.48) * 0.025;
+    const close = open + move;
+    const wick  = Math.abs(move) * (0.5 + Math.random());
+    const high  = Math.max(open, close) + wick;
+    const low   = Math.min(open, close) - wick;
+    candles.push({ time, open, high, low, close });
+    price = close;
+  }
+  return candles;
+}
+const MOCK_COINS = [
+  { id:'bitcoin',      symbol:'btc',  name:'Bitcoin',         image:'https://assets.coingecko.com/coins/images/1/small/bitcoin.png',            current_price:67420.12, price_change_percentage_24h:2.41,   price_change_percentage_7d_in_currency:5.12,   market_cap:1330000000000, total_volume:28400000000, high_24h:68200,  low_24h:65800,  market_cap_rank:1,  sparkline_in_7d:{price:makeFakeSpark(67420,  168)} },
+  { id:'ethereum',     symbol:'eth',  name:'Ethereum',        image:'https://assets.coingecko.com/coins/images/279/small/ethereum.png',          current_price:3512.88,  price_change_percentage_24h:-1.14,  price_change_percentage_7d_in_currency:3.22,   market_cap:422000000000,  total_volume:14200000000, high_24h:3600,   low_24h:3420,   market_cap_rank:2,  sparkline_in_7d:{price:makeFakeSpark(3512,   168)} },
+  { id:'tether',       symbol:'usdt', name:'Tether',          image:'https://assets.coingecko.com/coins/images/325/small/Tether.png',            current_price:1.00,     price_change_percentage_24h:0.01,   price_change_percentage_7d_in_currency:0.02,   market_cap:112000000000,  total_volume:58000000000, high_24h:1.001,  low_24h:0.999,  market_cap_rank:3,  sparkline_in_7d:{price:makeFakeSpark(1,      168)} },
+  { id:'bnb',          symbol:'bnb',  name:'BNB',             image:'https://assets.coingecko.com/coins/images/825/small/bnb-icon2_2x.png',      current_price:594.22,   price_change_percentage_24h:1.88,   price_change_percentage_7d_in_currency:-2.10,  market_cap:86000000000,   total_volume:1800000000,  high_24h:610,    low_24h:582,    market_cap_rank:4,  sparkline_in_7d:{price:makeFakeSpark(594,    168)} },
+  { id:'solana',       symbol:'sol',  name:'Solana',          image:'https://assets.coingecko.com/coins/images/4128/small/solana.png',           current_price:178.44,   price_change_percentage_24h:3.77,   price_change_percentage_7d_in_currency:9.34,   market_cap:82000000000,   total_volume:3600000000,  high_24h:185,    low_24h:172,    market_cap_rank:5,  sparkline_in_7d:{price:makeFakeSpark(178,    168)} },
+  { id:'usd-coin',     symbol:'usdc', name:'USDC',            image:'https://assets.coingecko.com/coins/images/6319/small/usdc.png',             current_price:1.00,     price_change_percentage_24h:0.00,   price_change_percentage_7d_in_currency:0.01,   market_cap:44000000000,   total_volume:7200000000,  high_24h:1.001,  low_24h:0.999,  market_cap_rank:6,  sparkline_in_7d:{price:makeFakeSpark(1,      168)} },
+  { id:'xrp',          symbol:'xrp',  name:'XRP',             image:'https://assets.coingecko.com/coins/images/44/small/xrp-symbol-white-128.png', current_price:0.5812, price_change_percentage_24h:-0.92,  price_change_percentage_7d_in_currency:1.44,   market_cap:31000000000,   total_volume:1100000000,  high_24h:0.598,  low_24h:0.571,  market_cap_rank:7,  sparkline_in_7d:{price:makeFakeSpark(0.58,   168)} },
+  { id:'staked-ether', symbol:'steth',name:'Lido Staked ETH', image:'https://assets.coingecko.com/coins/images/13442/small/steth_logo.png',      current_price:3509.00,  price_change_percentage_24h:-1.10,  price_change_percentage_7d_in_currency:3.18,   market_cap:29000000000,   total_volume:180000000,   high_24h:3597,   low_24h:3418,   market_cap_rank:8,  sparkline_in_7d:{price:makeFakeSpark(3509,   168)} },
+  { id:'dogecoin',     symbol:'doge', name:'Dogecoin',        image:'https://assets.coingecko.com/coins/images/5/small/dogecoin.png',            current_price:0.1642,   price_change_percentage_24h:4.21,   price_change_percentage_7d_in_currency:12.44,  market_cap:23600000000,   total_volume:2100000000,  high_24h:0.172,  low_24h:0.155,  market_cap_rank:9,  sparkline_in_7d:{price:makeFakeSpark(0.164,  168)} },
+  { id:'cardano',      symbol:'ada',  name:'Cardano',         image:'https://assets.coingecko.com/coins/images/975/small/cardano.png',           current_price:0.4812,   price_change_percentage_24h:-2.14,  price_change_percentage_7d_in_currency:-4.88,  market_cap:17100000000,   total_volume:420000000,   high_24h:0.498,  low_24h:0.471,  market_cap_rank:10, sparkline_in_7d:{price:makeFakeSpark(0.48,   168)} },
+];
 
 /* ─── NUMBER FORMAT ──────────────────────────────────────── */
 function fmtPrice(n) {
@@ -1071,7 +1093,6 @@ async function apiFetch(url) {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
-
 function showRateLimit() {
   document.getElementById('last-updated').textContent = 'Rate limited — showing cached data';
 }
@@ -1098,57 +1119,83 @@ function flash(el, dir) {
 }
 
 /* ─── FEAR & GREED GAUGE (SVG) ───────────────────────────── */
-function buildGauge() {
-  const value = 67;
+function fgColor(v) {
+  if (v <= 25) return '#EF4444';
+  if (v <= 50) return '#F97316';
+  if (v <= 75) return '#10B981';
+  return '#22C55E';
+}
+function fgLabel(v) {
+  if (v <= 25) return 'EXTREME FEAR';
+  if (v <= 50) return 'FEAR';
+  if (v <= 75) return 'GREED';
+  return 'EXTREME GREED';
+}
+function buildGauge(value) {
   const svg = document.getElementById('fg-gauge');
   const cx = 100, cy = 100, r = 80;
-
   function polarToXY(deg) {
     const rad = (deg - 180) * Math.PI / 180;
     return [cx + r * Math.cos(rad), cy + r * Math.sin(rad)];
   }
-  function arc(startDeg, endDeg, color) {
-    const [x1,y1] = polarToXY(startDeg);
-    const [x2,y2] = polarToXY(endDeg);
-    const large = (endDeg - startDeg) > 180 ? 1 : 0;
-    return `<path d="M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2}"
-      fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round"
-      opacity="0.85"/>`;
+  function arc(s, e, color) {
+    const [x1,y1] = polarToXY(s);
+    const [x2,y2] = polarToXY(e);
+    return `<path d="M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}"
+      fill="none" stroke="${color}" stroke-width="14" stroke-linecap="round" opacity="0.85"/>`;
   }
-
-  const segments = [
-    [0,   45,  '#EF4444'],
-    [45,  90,  '#F97316'],
-    [90,  135, '#10B981'],
-    [135, 180, '#22C55E'],
-  ];
-  let paths = segments.map(([s,e,c]) => arc(s,e,c)).join('\n');
-
+  const segments = [[0,45,'#EF4444'],[45,90,'#F97316'],[90,135,'#10B981'],[135,180,'#22C55E']];
+  const paths = segments.map(([s,e,c]) => arc(s,e,c)).join('');
   const needleDeg = value * 1.8;
   const [nx, ny] = polarToXY(needleDeg);
-  const needle = `
-    <line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}"
-      stroke="#F0F6FF" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
-    <circle cx="${cx}" cy="${cy}" r="5" fill="#F0F6FF" opacity="0.9"/>
-  `;
+  svg.innerHTML = paths +
+    `<line x1="${cx}" y1="${cy}" x2="${nx}" y2="${ny}" stroke="#F0F6FF" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
+     <circle cx="${cx}" cy="${cy}" r="5" fill="#F0F6FF" opacity="0.9"/>
+     <text x="14"  y="106" fill="#EF4444" font-size="9" font-family="JetBrains Mono" text-anchor="middle">FEAR</text>
+     <text x="186" y="106" fill="#22C55E" font-size="9" font-family="JetBrains Mono" text-anchor="middle">GREED</text>`;
+}
 
-  const labels = `
-    <text x="14" y="106" fill="#EF4444" font-size="9" font-family="JetBrains Mono" text-anchor="middle">FEAR</text>
-    <text x="186" y="106" fill="#22C55E" font-size="9" font-family="JetBrains Mono" text-anchor="middle">GREED</text>
-  `;
+/* ─── FEAR & GREED API ───────────────────────────────────── */
+async function loadFearGreed() {
+  try {
+    const json = await apiFetch(FNG_URL);
+    const d = json.data;
+    const v = parseInt(d[0].value);
+    document.getElementById('fg-number').textContent    = v;
+    document.getElementById('fg-sentiment').textContent = fgLabel(v);
+    document.getElementById('fg-sentiment').style.color = fgColor(v);
 
-  svg.innerHTML = paths + needle + labels;
+    const setComp = (id, entry) => {
+      const val = parseInt(entry.value);
+      const el  = document.getElementById(id);
+      el.textContent  = val;
+      el.style.color  = fgColor(val);
+    };
+    setComp('fg-yesterday', d[1]);
+    setComp('fg-lastweek',  d[6]  || d[d.length-1]);
+    setComp('fg-lastmonth', d[29] || d[d.length-1]);
+    buildGauge(v);
+  } catch(e) {
+    buildGauge(67);
+    document.getElementById('fg-number').textContent    = '67';
+    document.getElementById('fg-sentiment').textContent = 'GREED';
+    document.getElementById('fg-sentiment').style.color = '#10B981';
+    document.getElementById('fg-yesterday').textContent = '63';
+    document.getElementById('fg-lastweek').textContent  = '58';
+    document.getElementById('fg-lastmonth').textContent = '41';
+    document.getElementById('fg-yesterday').style.color = '#10B981';
+    document.getElementById('fg-lastweek').style.color  = '#10B981';
+    document.getElementById('fg-lastmonth').style.color = '#F97316';
+  }
 }
 
 /* ─── SKELETON SHOW / HIDE ───────────────────────────────── */
 function showSkeletonFeatured() {
-  document.getElementById('featured-price').textContent = '—';
+  document.getElementById('featured-price').textContent  = '—';
   document.getElementById('featured-change').textContent = '—';
-  ['fstat-high','fstat-low','fstat-mcap','fstat-vol'].forEach(id => {
-    document.getElementById(id).textContent = '—';
-  });
+  ['fstat-high','fstat-low','fstat-mcap','fstat-vol'].forEach(id =>
+    document.getElementById(id).textContent = '—');
 }
-
 function showSkeletonTable() {
   const tbody = document.getElementById('coins-tbody');
   tbody.innerHTML = Array.from({length:10}, (_,i) => `
@@ -1163,79 +1210,67 @@ function showSkeletonTable() {
       </div></td>
       <td><div class="skeleton sk-line" style="width:80px;margin-left:auto"></div></td>
       <td><div class="skeleton sk-line" style="width:50px;margin-left:auto"></div></td>
-      <td><div class="skeleton sk-line" style="width:50px;margin-left:auto"></div></td>
+      <td class="col-7d"><div class="skeleton sk-line" style="width:50px;margin-left:auto"></div></td>
       <td class="col-mcap"><div class="skeleton sk-line" style="width:70px;margin-left:auto"></div></td>
       <td class="col-vol"><div class="skeleton sk-line" style="width:70px;margin-left:auto"></div></td>
-      <td class="td-spark"></td>
+      <td class="col-spark"></td>
     </tr>`).join('');
 }
 
 /* ─── RENDER FEATURED CARD ───────────────────────────────── */
 function renderFeatured(coin) {
-  const logo   = document.getElementById('featured-logo');
-  const name   = document.getElementById('featured-name');
-  const sym    = document.getElementById('featured-symbol');
-  const rank   = document.getElementById('featured-rank');
-  const priceEl= document.getElementById('featured-price');
-  const chg    = document.getElementById('featured-change');
+  const logo    = document.getElementById('featured-logo');
+  const nameEl  = document.getElementById('featured-name');
+  const symEl   = document.getElementById('featured-symbol');
+  const rankEl  = document.getElementById('featured-rank');
+  const priceEl = document.getElementById('featured-price');
+  const chgEl   = document.getElementById('featured-change');
 
   logo.src = coin.image || '';
   logo.alt = coin.name;
-  name.textContent = coin.name;
-  sym.textContent  = coin.symbol.toUpperCase();
-  rank.textContent = '#' + coin.market_cap_rank;
+  nameEl.textContent = coin.name;
+  symEl.textContent  = coin.symbol.toUpperCase();
+  rankEl.textContent = '#' + coin.market_cap_rank;
 
   const prevPrice = parseFloat(priceEl.dataset.raw || coin.current_price);
   priceEl.dataset.raw = coin.current_price;
   animateValue(priceEl, prevPrice, coin.current_price, fmtPrice);
-
-  if (prevPrice !== coin.current_price) {
+  if (prevPrice !== coin.current_price)
     flash(priceEl, coin.current_price > prevPrice ? 'up' : 'down');
-  }
 
   const pct = coin.price_change_percentage_24h;
   const up  = pct >= 0;
-  chg.textContent = (up ? '▲ ' : '▼ ') + fmtPct(pct);
-  chg.className = 'change-pill ' + (up ? 'positive' : 'negative');
+  chgEl.textContent = (up ? '▲ ' : '▼ ') + fmtPct(pct);
+  chgEl.className   = 'change-pill ' + (up ? 'positive' : 'negative');
 
   document.getElementById('fstat-high').textContent = fmtPrice(coin.high_24h);
   document.getElementById('fstat-low').textContent  = fmtPrice(coin.low_24h);
   document.getElementById('fstat-mcap').textContent = fmtLarge(coin.market_cap);
   document.getElementById('fstat-vol').textContent  = fmtLarge(coin.total_volume);
-
   document.getElementById('chart-title').textContent =
-    `PRICE CHART — ${coin.symbol.toUpperCase()}/USD`;
+    `CANDLES — ${coin.symbol.toUpperCase()}/USD`;
 }
 
-/* ─── SPARKLINES ─────────────────────────────────────────── */
+/* ─── SPARKLINES (Chart.js mini) ─────────────────────────── */
 const sparkInstances = new Map();
 function renderSparkline(canvas, prices, positive) {
   if (!canvas || !prices || prices.length === 0) return;
   const id = canvas.dataset.sparkId;
   if (sparkInstances.has(id)) sparkInstances.get(id).destroy();
-
   const color = positive ? '#10B981' : '#EF4444';
   canvas.width  = 60;
   canvas.height = 32;
-
   const chart = new Chart(canvas, {
     type: 'line',
     data: {
       labels: prices.map((_,i) => i),
-      datasets: [{
-        data: prices,
-        borderColor: color,
-        borderWidth: 1.5,
-        pointRadius: 0,
-        tension: 0.4,
-        fill: false,
-      }]
+      datasets: [{ data: prices, borderColor: color, borderWidth: 1.5,
+        pointRadius: 0, tension: 0.4, fill: false }]
     },
     options: {
-      responsive: false,
-      animation: false,
-      plugins: { legend: { display:false }, tooltip: { enabled:false } },
-      scales: { x:{ display:false }, y:{ display:false } },
+      responsive: false, animation: false,
+      plugins: { legend:{display:false}, tooltip:{enabled:false} },
+      scales: { x:{display:false}, y:{display:false} },
     }
   });
   sparkInstances.set(id, chart);
@@ -1245,19 +1280,15 @@ function renderSparkline(canvas, prices, positive) {
 function renderTable(coins) {
   const tbody = document.getElementById('coins-tbody');
   tbody.innerHTML = '';
-
-  coins.forEach((coin, idx) => {
-    const pct24   = coin.price_change_percentage_24h;
-    const pct7    = coin.price_change_percentage_7d_in_currency;
-    const up24    = pct24 >= 0;
-    const up7     = pct7  >= 0;
-    const isActive= coin.id === activeCoinId;
+  coins.forEach(coin => {
+    const pct24 = coin.price_change_percentage_24h;
+    const pct7  = coin.price_change_percentage_7d_in_currency;
+    const up24  = pct24 >= 0;
+    const up7   = pct7  >= 0;
     const sparkId = 'spark-' + coin.id;
-
     const tr = document.createElement('tr');
-    if (isActive) tr.classList.add('active');
+    if (coin.id === activeCoinId) tr.classList.add('active');
     tr.dataset.id = coin.id;
-
     tr.innerHTML = `
       <td class="td-rank">${coin.market_cap_rank}</td>
       <td><div class="td-coin">
@@ -1269,126 +1300,109 @@ function renderTable(coins) {
       </div></td>
       <td class="td-price">${fmtPrice(coin.current_price)}</td>
       <td class="td-change ${up24?'up':'down'}">${up24?'▲':'▼'} ${fmtPct(pct24)}</td>
-      <td class="td-change col-7d ${up7 ?'up':'down'}">${up7 ?'▲':'▼'} ${fmtPct(pct7)}</td>
+      <td class="td-change col-7d ${up7?'up':'down'}">${up7?'▲':'▼'} ${fmtPct(pct7)}</td>
       <td class="td-mcap col-mcap">${fmtLarge(coin.market_cap)}</td>
       <td class="td-vol  col-vol">${fmtLarge(coin.total_volume)}</td>
       <td class="td-spark col-spark"><canvas data-spark-id="${sparkId}" width="60" height="32"></canvas></td>
     `;
-
     tr.addEventListener('click', () => selectCoin(coin));
     tbody.appendChild(tr);
-
     const canvas = tr.querySelector('canvas');
-    const prices = coin.sparkline_in_7d?.price || [];
-    renderSparkline(canvas, prices, pct7 >= 0);
+    renderSparkline(canvas, coin.sparkline_in_7d?.price || [], pct7 >= 0);
   });
 }
 
-/* ─── PRICE CHART ────────────────────────────────────────── */
+/* ─── CANDLESTICK CHART (Lightweight Charts) ─────────────── */
+function destroyChart() {
+  if (chartRO)   { chartRO.disconnect(); chartRO = null; }
+  if (lwChart)   { lwChart.remove(); lwChart = null; candleSeries = null; }
+}
+
+function createChart() {
+  const container = document.getElementById('price-chart-container');
+  destroyChart();
+
+  lwChart = LightweightCharts.createChart(container, {
+    width:  container.clientWidth,
+    height: container.clientHeight,
+    layout: {
+      background: { type: 'solid', color: 'transparent' },
+      textColor: '#3D4F63',
+      fontFamily: "'JetBrains Mono', monospace",
+    },
+    grid: {
+      vertLines: { color: 'rgba(26,35,50,0.4)' },
+      horzLines: { color: 'rgba(26,35,50,0.4)' },
+    },
+    crosshair: {
+      mode: LightweightCharts.CrosshairMode.Normal,
+      vertLine: { color: '#3B82F6', width: 1, style: 3, labelBackgroundColor: '#131920' },
+      horzLine: { color: '#3B82F6', width: 1, style: 3, labelBackgroundColor: '#131920' },
+    },
+    rightPriceScale: {
+      borderColor: '#1A2332',
+      textColor: '#3D4F63',
+    },
+    timeScale: {
+      borderColor: '#1A2332',
+      textColor: '#3D4F63',
+      timeVisible: true,
+      secondsVisible: false,
+      fixLeftEdge: true,
+      fixRightEdge: true,
+    },
+    handleScroll: true,
+    handleScale:  true,
+  });
+
+  candleSeries = lwChart.addCandlestickSeries({
+    upColor:        '#10B981',
+    downColor:      '#EF4444',
+    borderUpColor:  '#10B981',
+    borderDownColor:'#EF4444',
+    wickUpColor:    '#10B981',
+    wickDownColor:  '#EF4444',
+  });
+
+  chartRO = new ResizeObserver(() => {
+    if (lwChart) {
+      lwChart.applyOptions({
+        width:  container.clientWidth,
+        height: container.clientHeight,
+      });
+    }
+  });
+  chartRO.observe(container);
+}
+
 async function loadChart(coinId, days) {
   const wrap = document.getElementById('chart-wrap');
   wrap.classList.add('fading');
 
-  let prices = [];
-  let labels = [];
-  let usingMock = false;
+  createChart();
 
+  let candles = [];
   try {
-    const data = await apiFetch(
-      `${BASE}/coins/${coinId}/market_chart?vs_currency=usd&days=${days}`
+    const raw = await apiFetch(
+      `${BASE}/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`
     );
-    prices = data.prices.map(p => p[1]);
-    labels = data.prices.map(p => {
-      const d = new Date(p[0]);
-      return days <= 1
-        ? d.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'})
-        : d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
-    });
+    const seen = new Set();
+    candles = raw
+      .map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000), open:o, high:h, low:l, close:c }))
+      .filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true; })
+      .sort((a, b) => a.time - b.time);
   } catch(e) {
     if (e.code === 429) showRateLimit();
-    usingMock = true;
     const mock = MOCK_COINS.find(c => c.id === coinId) || MOCK_COINS[0];
-    prices = mock.sparkline_in_7d.price;
-    labels = prices.map((_,i) => 'D' + (i+1));
+    const intervalMs = days <= 1 ? 30*60*1000 : days <= 30 ? 4*3600*1000 : 4*24*3600*1000;
+    const count      = days <= 1 ? 48 : days <= 30 ? 42 : 23;
+    candles = makeFakeOHLC(mock.current_price, count, intervalMs);
   }
 
-  const canvas = document.getElementById('price-chart');
-  if (priceChart) { priceChart.destroy(); priceChart = null; }
-
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createLinearGradient(0, 0, 0, 220);
-  grad.addColorStop(0,   'rgba(59,130,246,0.18)');
-  grad.addColorStop(1,   'rgba(59,130,246,0)');
-
-  priceChart = new Chart(canvas, {
-    type: 'line',
-    data: {
-      labels,
-      datasets: [{
-        data: prices,
-        borderColor: '#3B82F6',
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 5,
-        pointHoverBackgroundColor: '#3B82F6',
-        tension: 0.35,
-        fill: true,
-        backgroundColor: grad,
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      interaction: { intersect: false, mode: 'index' },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          backgroundColor: '#131920',
-          borderColor: '#1A2332',
-          borderWidth: 1,
-          titleColor: '#7A8FA6',
-          bodyColor: '#F0F6FF',
-          titleFont: { family: 'Inter', size: 11 },
-          bodyFont:  { family: 'JetBrains Mono', size: 13, weight: '500' },
-          padding: 10,
-          cornerRadius: 4,
-          displayColors: false,
-          callbacks: {
-            label: ctx => fmtPrice(ctx.parsed.y)
-          }
-        }
-      },
-      scales: {
-        x: {
-          display: true,
-          grid: { display: false },
-          ticks: {
-            color: '#3D4F63',
-            font: { family: 'Inter', size: 10 },
-            maxTicksLimit: 6,
-            maxRotation: 0,
-          },
-          border: { display: false }
-        },
-        y: {
-          display: true,
-          position: 'right',
-          grid: {
-            color: 'rgba(26,35,50,0.5)',
-            drawBorder: false,
-          },
-          ticks: {
-            color: '#3D4F63',
-            font: { family: 'JetBrains Mono', size: 10 },
-            maxTicksLimit: 5,
-            callback: v => fmtPrice(v),
-          },
-          border: { display: false }
-        }
-      },
-      animation: { duration: 400, easing: 'easeInOutQuart' }
-    }
-  });
+  if (candles.length) {
+    candleSeries.setData(candles);
+    lwChart.timeScale().fitContent();
+  }
 
   setTimeout(() => wrap.classList.remove('fading'), 50);
 }
@@ -1400,31 +1414,25 @@ async function selectCoin(coin) {
   highlightActiveRow();
   await loadChart(coin.id, activePeriod);
 }
-
 function highlightActiveRow() {
-  document.querySelectorAll('#coins-tbody tr').forEach(tr => {
-    tr.classList.toggle('active', tr.dataset.id === activeCoinId);
-  });
+  document.querySelectorAll('#coins-tbody tr').forEach(tr =>
+    tr.classList.toggle('active', tr.dataset.id === activeCoinId));
 }
 
 /* ─── GLOBAL STATS ───────────────────────────────────────── */
 async function loadGlobalStats() {
   try {
     const { data } = await apiFetch(`${BASE}/global`);
-    document.getElementById('stat-mcap').textContent =
-      fmtLarge(data.total_market_cap?.usd);
-    document.getElementById('stat-vol').textContent =
-      fmtLarge(data.total_volume?.usd);
-    document.getElementById('stat-btc-dom').textContent =
-      fmtDom(data.market_cap_percentage?.btc);
-    document.getElementById('stat-eth-dom').textContent =
-      fmtDom(data.market_cap_percentage?.eth);
+    document.getElementById('stat-mcap').textContent    = fmtLarge(data.total_market_cap?.usd);
+    document.getElementById('stat-vol').textContent     = fmtLarge(data.total_volume?.usd);
+    document.getElementById('stat-btc-dom').textContent = fmtDom(data.market_cap_percentage?.btc);
+    document.getElementById('stat-eth-dom').textContent = fmtDom(data.market_cap_percentage?.eth);
   } catch(e) {
     if (e.code === 429) showRateLimit();
-    document.getElementById('stat-mcap').textContent   = '$2.41T';
-    document.getElementById('stat-vol').textContent    = '$84.2B';
-    document.getElementById('stat-btc-dom').textContent= '54.1%';
-    document.getElementById('stat-eth-dom').textContent= '17.3%';
+    document.getElementById('stat-mcap').textContent    = '$2.41T';
+    document.getElementById('stat-vol').textContent     = '$84.2B';
+    document.getElementById('stat-btc-dom').textContent = '54.1%';
+    document.getElementById('stat-eth-dom').textContent = '17.3%';
   }
 }
 
@@ -1438,41 +1446,24 @@ async function loadCoins() {
     return coins;
   } catch(e) {
     if (e.code === 429) showRateLimit();
-    return MOCK_COINS;
+    return coinsCache || MOCK_COINS;
   }
 }
 
 /* ─── FULL REFRESH ───────────────────────────────────────── */
 async function refresh(initial = false) {
   const ind = document.getElementById('refresh-indicator');
-  if (!initial) {
-    ind.classList.add('active');
-  }
+  if (!initial) ind.classList.add('active');
+  if (initial) { showSkeletonTable(); showSkeletonFeatured(); }
 
-  if (initial) {
-    showSkeletonTable();
-    showSkeletonFeatured();
-  }
-
-  const [coins] = await Promise.all([
-    loadCoins(),
-    loadGlobalStats(),
-  ]);
-
-  const minDelay = initial
-    ? new Promise(r => setTimeout(r, 400))
-    : Promise.resolve();
-
-  await minDelay;
+  const [coins] = await Promise.all([loadCoins(), loadGlobalStats()]);
+  if (initial) await new Promise(r => setTimeout(r, 400));
 
   renderTable(coins);
-
   const active = coins.find(c => c.id === activeCoinId) || coins[0];
   renderFeatured(active);
 
-  if (initial) {
-    await loadChart(activeCoinId, activePeriod);
-  }
+  if (initial) await loadChart(activeCoinId, activePeriod);
 
   const now = new Date();
   document.getElementById('last-updated').textContent =
@@ -1480,7 +1471,6 @@ async function refresh(initial = false) {
     String(now.getHours()).padStart(2,'0')   + ':' +
     String(now.getMinutes()).padStart(2,'0') + ':' +
     String(now.getSeconds()).padStart(2,'0');
-
   ind.classList.remove('active');
 }
 
@@ -1496,7 +1486,7 @@ document.getElementById('period-tabs').addEventListener('click', async e => {
 
 /* ─── BOOT ───────────────────────────────────────────────── */
 startClock();
-buildGauge();
+loadFearGreed();
 refresh(true);
 refreshTimer = setInterval(() => refresh(false), REFRESH_MS);
 </script>
