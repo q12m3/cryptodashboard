@@ -917,10 +917,10 @@ tbody td:nth-child(2) { text-align: left; }
       <div id="chart-header">
         <span id="chart-title">PRICE CHART — BTC/USD</span>
         <div id="period-tabs">
-          <button class="period-tab" data-period="1">1D</button>
-          <button class="period-tab active" data-period="7">7D</button>
-          <button class="period-tab" data-period="30">30D</button>
-          <button class="period-tab" data-period="90">90D</button>
+          <button class="period-tab" data-period="1m">1m</button>
+          <button class="period-tab" data-period="15m">15m</button>
+          <button class="period-tab active" data-period="1h">1h</button>
+          <button class="period-tab" data-period="1d">1d</button>
         </div>
       </div>
       <div id="chart-wrap">
@@ -1007,7 +1007,7 @@ const REFRESH_MS = 30_000;
 
 /* ─── STATE ──────────────────────────────────────────────── */
 let activeCoinId    = 'bitcoin';
-let activePeriod    = 7;
+let activePeriod    = '1h';
 let coinsCache      = null;
 let lwChart         = null;
 let candleSeries    = null;
@@ -1312,10 +1312,24 @@ function renderTable(coins) {
   });
 }
 
+/* ─── BINANCE SYMBOL MAP ─────────────────────────────────── */
+const BINANCE_SYMBOL = {
+  'bitcoin':      'BTCUSDT',
+  'ethereum':     'ETHUSDT',
+  'bnb':          'BNBUSDT',
+  'solana':       'SOLUSDT',
+  'xrp':          'XRPUSDT',
+  'dogecoin':     'DOGEUSDT',
+  'cardano':      'ADAUSDT',
+  'staked-ether': 'STETHUSDT',
+};
+const BINANCE_LIMIT = { '1m': 120, '15m': 192, '1h': 168, '1d': 90 };
+const MOCK_INTERVAL = { '1m': 60_000, '15m': 900_000, '1h': 3_600_000, '1d': 86_400_000 };
+
 /* ─── CANDLESTICK CHART (Lightweight Charts) ─────────────── */
 function destroyChart() {
-  if (chartRO)   { chartRO.disconnect(); chartRO = null; }
-  if (lwChart)   { lwChart.remove(); lwChart = null; candleSeries = null; }
+  if (chartRO) { chartRO.disconnect(); chartRO = null; }
+  if (lwChart) { lwChart.remove(); lwChart = null; candleSeries = null; }
 }
 
 function createChart() {
@@ -1339,10 +1353,7 @@ function createChart() {
       vertLine: { color: '#3B82F6', width: 1, style: 3, labelBackgroundColor: '#131920' },
       horzLine: { color: '#3B82F6', width: 1, style: 3, labelBackgroundColor: '#131920' },
     },
-    rightPriceScale: {
-      borderColor: '#1A2332',
-      textColor: '#3D4F63',
-    },
+    rightPriceScale: { borderColor: '#1A2332', textColor: '#3D4F63' },
     timeScale: {
       borderColor: '#1A2332',
       textColor: '#3D4F63',
@@ -1356,54 +1367,59 @@ function createChart() {
   });
 
   candleSeries = lwChart.addCandlestickSeries({
-    upColor:        '#10B981',
-    downColor:      '#EF4444',
-    borderUpColor:  '#10B981',
-    borderDownColor:'#EF4444',
-    wickUpColor:    '#10B981',
-    wickDownColor:  '#EF4444',
+    upColor:         '#10B981',
+    downColor:       '#EF4444',
+    borderUpColor:   '#10B981',
+    borderDownColor: '#EF4444',
+    wickUpColor:     '#10B981',
+    wickDownColor:   '#EF4444',
   });
 
   chartRO = new ResizeObserver(() => {
-    if (lwChart) {
-      lwChart.applyOptions({
-        width:  container.clientWidth,
-        height: container.clientHeight,
-      });
-    }
+    if (lwChart) lwChart.applyOptions({
+      width:  container.clientWidth,
+      height: container.clientHeight,
+    });
   });
   chartRO.observe(container);
 }
 
-async function loadChart(coinId, days) {
+async function loadChart(coinId, interval) {
   const wrap = document.getElementById('chart-wrap');
   wrap.classList.add('fading');
-
   createChart();
 
-  let candles = [];
-  try {
-    const raw = await apiFetch(
-      `${BASE}/coins/${coinId}/ohlc?vs_currency=usd&days=${days}`
-    );
-    const seen = new Set();
-    candles = raw
-      .map(([t, o, h, l, c]) => ({ time: Math.floor(t / 1000), open:o, high:h, low:l, close:c }))
-      .filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true; })
-      .sort((a, b) => a.time - b.time);
-  } catch(e) {
-    if (e.code === 429) showRateLimit();
+  const symbol = BINANCE_SYMBOL[coinId];
+  const limit  = BINANCE_LIMIT[interval] || 120;
+  let candles  = [];
+
+  if (symbol) {
+    try {
+      const url = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+      const raw = await apiFetch(url);
+      const seen = new Set();
+      candles = raw
+        .map(k => ({
+          time:  Math.floor(k[0] / 1000),
+          open:  parseFloat(k[1]),
+          high:  parseFloat(k[2]),
+          low:   parseFloat(k[3]),
+          close: parseFloat(k[4]),
+        }))
+        .filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true; })
+        .sort((a, b) => a.time - b.time);
+    } catch(e) {
+      if (e.code === 429) showRateLimit();
+    }
+  }
+
+  if (candles.length === 0) {
     const mock = MOCK_COINS.find(c => c.id === coinId) || MOCK_COINS[0];
-    const intervalMs = days <= 1 ? 30*60*1000 : days <= 30 ? 4*3600*1000 : 4*24*3600*1000;
-    const count      = days <= 1 ? 48 : days <= 30 ? 42 : 23;
-    candles = makeFakeOHLC(mock.current_price, count, intervalMs);
+    candles = makeFakeOHLC(mock.current_price, limit, MOCK_INTERVAL[interval] || 3_600_000);
   }
 
-  if (candles.length) {
-    candleSeries.setData(candles);
-    lwChart.timeScale().fitContent();
-  }
-
+  candleSeries.setData(candles);
+  lwChart.timeScale().fitContent();
   setTimeout(() => wrap.classList.remove('fading'), 50);
 }
 
@@ -1480,7 +1496,7 @@ document.getElementById('period-tabs').addEventListener('click', async e => {
   if (!btn) return;
   document.querySelectorAll('.period-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
-  activePeriod = parseInt(btn.dataset.period);
+  activePeriod = btn.dataset.period;
   await loadChart(activeCoinId, activePeriod);
 });
 
