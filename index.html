@@ -745,27 +745,88 @@ tbody td:nth-child(2) { text-align: left; }
 @media (max-width: 1024px) {
   #main {
     grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
   }
-  #col-left  { grid-column: 1 / 2; grid-row: 1; }
-  #col-center{ grid-column: 2 / 3; grid-row: 1; }
-  #col-right { grid-column: 1 / 3; grid-row: 2; }
+  #col-left   { grid-column: 1 / 2; grid-row: 1 / 2; }
+  #col-center { grid-column: 2 / 3; grid-row: 1 / 2; }
+  #col-right  { grid-column: 1 / 3; grid-row: 2 / 3; }
 }
 
-@media (max-width: 680px) {
-  #topbar-center { display: none; }
+/* ── Tablet narrow ─────────────────────────────────────────── */
+@media (max-width: 760px) {
   #main {
     grid-template-columns: 1fr;
-    padding: 12px 12px 32px;
+    grid-template-rows: auto;
+    padding: 12px 12px 40px;
+    gap: 12px;
   }
   #col-left, #col-center, #col-right {
     grid-column: 1;
     grid-row: auto;
   }
-  #featured-price { font-size: 36px; }
-  #chart-wrap { height: 200px; }
-  .col-mcap, .col-vol { display: none; }
-  #stats-bar-inner { padding: 0 12px; }
-  #topbar-inner { padding: 0 12px; }
+}
+
+/* ── Mobile ────────────────────────────────────────────────── */
+@media (max-width: 680px) {
+  /* topbar */
+  #topbar-center  { display: none; }
+  #last-updated   { display: none; }
+  #topbar-inner   { padding: 0 14px; height: 50px; }
+  #logo           { font-size: 16px; }
+  #live-badge     { gap: 5px; }
+
+  /* stats bar */
+  #stats-bar-inner     { padding: 0 14px; }
+  .stat-item           { padding: 8px 14px 8px 0; }
+  .stat-item .stat-value { font-size: 13px; }
+  .stat-item .stat-label { font-size: 9px; }
+
+  /* featured card */
+  #featured-card  { padding: 16px; }
+  #featured-logo  { width: 38px; height: 38px; }
+  #featured-name  { font-size: 17px; }
+  #featured-price { font-size: 32px; }
+  #featured-stats { gap: 8px; }
+  .fstat          { padding: 10px 12px; }
+  .fstat-value    { font-size: 13px; }
+
+  /* chart card */
+  #chart-card   { padding: 14px 14px 12px; }
+  #chart-wrap   { height: 180px; }
+  #chart-title  { display: none; }
+  .period-tab   { padding: 4px 8px; font-size: 10px; }
+
+  /* table — hide 7d%, volume, sparkline; keep #/Coin/Price/24h% */
+  .col-mcap, .col-vol, .col-7d, .col-spark { display: none; }
+  tbody td, thead th { padding: 9px 8px; }
+  .td-coin img    { width: 22px; height: 22px; }
+  .td-coin        { gap: 7px; }
+  .td-coin-name   { font-size: 12px; }
+  .td-price       { font-size: 12px; }
+  .td-change      { font-size: 11px; }
+
+  /* fear & greed — horizontal layout */
+  #fg-card        { padding: 16px; }
+  #fg-gauge-wrap  {
+    flex-direction: row;
+    justify-content: center;
+    align-items: center;
+    gap: 24px;
+  }
+  #fg-gauge       { width: 140px; height: 70px; flex-shrink: 0; }
+  #fg-number      { font-size: 32px; }
+  #fg-sentiment   { font-size: 12px; }
+  #fg-comparisons { margin-top: 12px; }
+}
+
+/* ── Extra-small phones ────────────────────────────────────── */
+@media (max-width: 380px) {
+  #logo         { font-size: 14px; letter-spacing: 0.08em; }
+  #featured-price { font-size: 26px; }
+  .stat-item    { padding: 7px 10px 7px 0; }
+  .fstat-value  { font-size: 12px; }
+  #fg-gauge     { width: 120px; height: 60px; }
+  #fg-number    { font-size: 28px; }
 }
 </style>
 </head>
@@ -883,10 +944,10 @@ tbody td:nth-child(2) { text-align: left; }
               <th>Coin</th>
               <th>Price</th>
               <th>24h %</th>
-              <th>7d %</th>
+              <th class="col-7d">7d %</th>
               <th class="col-mcap">Market Cap</th>
               <th class="col-vol">Volume</th>
-              <th>7d Chart</th>
+              <th class="col-spark">7d Chart</th>
             </tr>
           </thead>
           <tbody id="coins-tbody">
@@ -1208,10 +1269,10 @@ function renderTable(coins) {
       </div></td>
       <td class="td-price">${fmtPrice(coin.current_price)}</td>
       <td class="td-change ${up24?'up':'down'}">${up24?'▲':'▼'} ${fmtPct(pct24)}</td>
-      <td class="td-change ${up7 ?'up':'down'}">${up7 ?'▲':'▼'} ${fmtPct(pct7)}</td>
+      <td class="td-change col-7d ${up7 ?'up':'down'}">${up7 ?'▲':'▼'} ${fmtPct(pct7)}</td>
       <td class="td-mcap col-mcap">${fmtLarge(coin.market_cap)}</td>
       <td class="td-vol  col-vol">${fmtLarge(coin.total_volume)}</td>
-      <td class="td-spark"><canvas data-spark-id="${sparkId}" width="60" height="32"></canvas></td>
+      <td class="td-spark col-spark"><canvas data-spark-id="${sparkId}" width="60" height="32"></canvas></td>
     `;
 
     tr.addEventListener('click', () => selectCoin(coin));
